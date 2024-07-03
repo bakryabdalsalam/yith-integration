@@ -107,7 +107,7 @@ function create_yith_refund_request($order_id, $message) {
 
         $refund_request = new YITH_Refund_Request();
         $refund_request->order_id = $order_id;
-        $refund_request->whole_order = true; // Assuming the refund is for the entire order
+        $refund_request->whole_order = true; // الريكويست للاوردر كلو
         $refund_request->item_id = 0;
         $refund_request->item_value = 0;
         $refund_request->item_total = $order->get_total();

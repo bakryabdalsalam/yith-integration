@@ -2,7 +2,7 @@
 /*
 Plugin Name: WooCommerce Replacement Request
 Description: Adds a replacement request feature to WooCommerce orders.
-Version: 1.0
+Version: 1.1
 Author: Bakry Abdelsalam
 */
 
@@ -50,7 +50,7 @@ add_action('wp_enqueue_scripts', 'enqueue_replacement_request_scripts');
 function add_request_replacement_button_to_order_items($item_id, $item, $order) {
     if ($order->get_status() == 'completed' && !get_post_meta($order->get_id(), '_replacement_request_submitted_' . $item_id, true)) {
         $completion_date = $order->get_date_completed();
-        if ($completion_date && (time() - $completion_date->getTimestamp()) <= 7 * DAY_IN_SECONDS) {
+        if ($completion_date && (time() - $completion_date->getTimestamp()) <= 7 * DAY_IN_SECONDS && !get_post_meta($order->get_id(), '_replacement_request_submitted', true)) {
             ?>
             <button class="button replacement-request-button" data-order-id="<?php echo $order->get_id(); ?>" data-item-id="<?php echo $item_id; ?>">
                 <?php _e('تقديم طلب استبدال', 'woocommerce'); ?>
@@ -65,7 +65,7 @@ add_action('woocommerce_order_item_meta_end', 'add_request_replacement_button_to
 function add_request_replacement_button_for_whole_order($order) {
     if ($order->get_status() == 'completed' && !get_post_meta($order->get_id(), '_replacement_request_submitted_whole', true)) {
         $completion_date = $order->get_date_completed();
-        if ($completion_date && (time() - $completion_date->getTimestamp()) <= 7 * DAY_IN_SECONDS) {
+        if ($completion_date && (time() - $completion_date->getTimestamp()) <= 7 * DAY_IN_SECONDS && !get_post_meta($order->get_id(), '_replacement_request_submitted', true)) {
             ?>
             <button class="button replacement-request-button-whole" data-order-id="<?php echo $order->get_id(); ?>">
                 <?php _e('أستبدال الطلب بالكامل', 'woocommerce'); ?>
@@ -142,46 +142,39 @@ function handle_replacement_request() {
         $message = sanitize_textarea_field($_POST['replacement_message']);
         $order = wc_get_order($order_id);
 
-        $logger = wc_get_logger();
-        $context = array('source' => 'handle_replacement_request');
+        if (!$order) {
+            wc_add_notice(__('Order not found.', 'woocommerce'), 'error');
+            return;
+        }
 
         // Check if the order status is complete and within the last 7 days
-        if ($order->get_status() == 'completed' && (time() - $order->get_date_completed()->getTimestamp()) <= 7 * DAY_IN_SECONDS) {
-            // Check if a replacement request has already been submitted for this item
-            if (!get_post_meta($order_id, '_replacement_request_submitted_' . $item_id, true)) {
+        if ($order->get_status() === 'completed' && (time() - $order->get_date_completed()->getTimestamp()) <= 7 * DAY_IN_SECONDS) {
+            // Check if a replacement request has already been submitted for the item
+            if (!get_post_meta($order_id, '_replacement_request_submitted_' . $item_id, true) && !get_post_meta($order_id, '_replacement_request_submitted', true)) {
                 // Save the message as post meta
                 update_post_meta($order_id, '_replacement_request_message_' . $item_id, $message);
                 update_post_meta($order_id, '_replacement_request_submitted_' . $item_id, true);
-
-                // Log the message and order ID
-                $logger->info('Replacement message and order item ID saved.', $context);
+                update_post_meta($order_id, '_replacement_request_submitted', true);
 
                 // Create a refund request using the YITH Refund System plugin
                 $refund_request_created = create_yith_refund_request($order_id, $item_id, $message);
 
                 if ($refund_request_created) {
-                    // Add meta to refund request post to link it back to the original order item
+                    // Add meta to refund request post to link it back to the original order
                     update_post_meta($refund_request_created, '_order_id', $order_id);
                     update_post_meta($refund_request_created, '_item_id', $item_id);
                     update_post_meta($refund_request_created, '_replacement_request_submitted', true); // Indicate that this refund request is related to a replacement request
 
                     wc_add_notice(__('Your replacement request has been submitted and a refund request has been created.', 'woocommerce'), 'success');
-                    $logger->info('Refund request created successfully.', $context);
                 } else {
                     wc_add_notice(__('Your replacement request has been submitted, but there was an issue creating the refund request.', 'woocommerce'), 'error');
-                    $logger->error('Failed to create refund request.', $context);
                 }
             } else {
-                wc_add_notice(__('A replacement request has already been submitted for this product.', 'woocommerce'), 'error');
-                $logger->warning('Replacement request already submitted for order item ID: ' . $item_id, $context);
+                wc_add_notice(__('A replacement request has already been submitted for this item.', 'woocommerce'), 'error');
             }
         } else {
-            wc_add_notice(__('The replacement request period has expired.', 'woocommerce'), 'error');
-            $logger->warning('Replacement request period expired for order item ID: ' . $item_id, $context);
+            wc_add_notice(__('Replacement requests can only be submitted within 7 days of order completion.', 'woocommerce'), 'error');
         }
-
-        wp_redirect(wc_get_account_endpoint_url('orders'));
-        exit;
     }
 }
 add_action('template_redirect', 'handle_replacement_request');
@@ -193,19 +186,19 @@ function handle_replacement_request_whole() {
         $message = sanitize_textarea_field($_POST['replacement_message_whole']);
         $order = wc_get_order($order_id);
 
-        $logger = wc_get_logger();
-        $context = array('source' => 'handle_replacement_request_whole');
+        if (!$order) {
+            wc_add_notice(__('Order not found.', 'woocommerce'), 'error');
+            return;
+        }
 
         // Check if the order status is complete and within the last 7 days
-        if ($order->get_status() == 'completed' && (time() - $order->get_date_completed()->getTimestamp()) <= 7 * DAY_IN_SECONDS) {
-            // Check if a replacement request has already been submitted for this order
-            if (!get_post_meta($order_id, '_replacement_request_submitted_whole', true)) {
+        if ($order->get_status() === 'completed' && (time() - $order->get_date_completed()->getTimestamp()) <= 7 * DAY_IN_SECONDS) {
+            // Check if a replacement request has already been submitted for the whole order
+            if (!get_post_meta($order_id, '_replacement_request_submitted_whole', true) && !get_post_meta($order_id, '_replacement_request_submitted', true)) {
                 // Save the message as post meta
                 update_post_meta($order_id, '_replacement_request_message_whole', $message);
                 update_post_meta($order_id, '_replacement_request_submitted_whole', true);
-
-                // Log the message and order ID
-                $logger->info('Replacement message for whole order saved.', $context);
+                update_post_meta($order_id, '_replacement_request_submitted', true);
 
                 // Create a refund request using the YITH Refund System plugin
                 $refund_request_created = create_yith_refund_request($order_id, 0, $message); // 0 indicates the whole order
@@ -215,71 +208,67 @@ function handle_replacement_request_whole() {
                     update_post_meta($refund_request_created, '_order_id', $order_id);
                     update_post_meta($refund_request_created, '_replacement_request_submitted', true); // Indicate that this refund request is related to a replacement request
 
-                    wc_add_notice(__('Your replacement request has been submitted and a refund request has been created.', 'woocommerce'), 'success');
-                    $logger->info('Refund request created successfully for whole order.', $context);
+                    wc_add_notice(__('Your replacement request for the whole order has been submitted and a refund request has been created.', 'woocommerce'), 'success');
                 } else {
-                    wc_add_notice(__('Your replacement request has been submitted, but there was an issue creating the refund request.', 'woocommerce'), 'error');
-                    $logger->error('Failed to create refund request for whole order.', $context);
+                    wc_add_notice(__('Your replacement request for the whole order has been submitted, but there was an issue creating the refund request.', 'woocommerce'), 'error');
                 }
             } else {
-                wc_add_notice(__('A replacement request has already been submitted for this order.', 'woocommerce'), 'error');
-                $logger->warning('Replacement request already submitted for whole order ID: ' . $order_id, $context);
+                wc_add_notice(__('A replacement request has already been submitted for the whole order.', 'woocommerce'), 'error');
             }
         } else {
-            wc_add_notice(__('The replacement request period has expired.', 'woocommerce'), 'error');
-            $logger->warning('Replacement request period expired for whole order ID: ' . $order_id, $context);
+            wc_add_notice(__('Replacement requests can only be submitted within 7 days of order completion.', 'woocommerce'), 'error');
         }
-
-        wp_redirect(wc_get_account_endpoint_url('orders'));
-        exit;
     }
 }
 add_action('template_redirect', 'handle_replacement_request_whole');
 
 // Function to create a refund request using YITH Refund System plugin
 function create_yith_refund_request($order_id, $item_id, $message) {
-    if (class_exists('YITH_Refund_Request')) {
-        $order = wc_get_order($order_id);
-        if (!$order) {
-            return false;
-        }
-
-        $refund_request = new YITH_Refund_Request();
-        $refund_request->order_id = $order_id;
-        $refund_request->whole_order = ($item_id === 0); // True if the refund is for the entire order
-        $refund_request->item_id = $item_id;
-        $refund_request->item_value = ($item_id === 0) ? 0 : $order->get_item($item_id)->get_total();
-        $refund_request->item_total = ($item_id === 0) ? $order->get_total() : $order->get_item($item_id)->get_total();
-        $refund_request->tax_value = 0;
-        $refund_request->tax_total = 0;
-        $refund_request->qty = ($item_id === 0) ? 0 : $order->get_item($item_id)->get_quantity();
-        $refund_request->qty_total = ($item_id === 0) ? $order->get_item_count() : $order->get_item($item_id)->get_quantity();
-        $refund_request->item_refund_total = ($item_id === 0) ? $order->get_total() : $order->get_item($item_id)->get_total();
-        $refund_request->tax_refund_total = 0;
-        $refund_request->refund_total = ($item_id === 0) ? $order->get_total() : $order->get_item($item_id)->get_total();
-        $refund_request->refund_id = 0;
-        $refund_request->refunded_amount = 0;
-        $refund_request->customer_id = $order->get_user_id();
-        $refund_request->coupon_id = 0;
-        $refund_request->is_closed = false;
-        $refund_request->status = 'ywcars-pending';
-
-        $refund_request_id = $refund_request->save();
-
-        if ($refund_request_id) {
-            $refund_message = new YITH_Request_Message();
-            $refund_message->request = $refund_request_id;
-            $refund_message->message = $message;
-            $refund_message->author = $refund_request->customer_id;
-            $refund_message->save();
-
-            return $refund_request_id; // Return the refund request ID
-        }
-
-        return false;
-    } else {
+    if (!class_exists('YITH_Refund_Request')) {
+        error_log('YITH Refund Request class not found.');
         return false;
     }
+
+    $order = wc_get_order($order_id);
+    if (!$order) {
+        error_log('Order not found: ' . $order_id);
+        return false;
+    }
+
+    $refund_request = new YITH_Refund_Request();
+    $refund_request->order_id = $order_id;
+    $refund_request->whole_order = ($item_id === 0); // True if the refund is for the entire order
+    $refund_request->item_id = $item_id;
+    $refund_request->item_value = ($item_id === 0) ? 0 : $order->get_item($item_id)->get_total();
+    $refund_request->item_total = ($item_id === 0) ? $order->get_total() : $order->get_item($item_id)->get_total();
+    $refund_request->tax_value = 0;
+    $refund_request->tax_total = 0;
+    $refund_request->qty = ($item_id === 0) ? 0 : $order->get_item($item_id)->get_quantity();
+    $refund_request->qty_total = ($item_id === 0) ? $order->get_item_count() : $order->get_item($item_id)->get_quantity();
+    $refund_request->item_refund_total = ($item_id === 0) ? $order->get_total() : $order->get_item($item_id)->get_total();
+    $refund_request->tax_refund_total = 0;
+    $refund_request->refund_total = ($item_id === 0) ? $order->get_total() : $order->get_item($item_id)->get_total();
+    $refund_request->refund_id = 0;
+    $refund_request->refunded_amount = 0;
+    $refund_request->customer_id = $order->get_user_id();
+    $refund_request->coupon_id = 0;
+    $refund_request->is_closed = false;
+    $refund_request->status = 'ywcars-pending';
+
+    $refund_request_id = $refund_request->save();
+
+    if (!$refund_request_id) {
+        error_log('Failed to create refund request for order ID: ' . $order_id);
+        return false;
+    }
+
+    $refund_message = new YITH_Request_Message();
+    $refund_message->request = $refund_request_id;
+    $refund_message->message = $message;
+    $refund_message->author = $refund_request->customer_id;
+    $refund_message->save();
+
+    return $refund_request_id; // Return the refund request ID
 }
 
 // Display replacement request message in the order admin page
@@ -362,3 +351,4 @@ function add_replacement_request_title_yith($post) {
     }
 }
 add_action('edit_form_top', 'add_replacement_request_title_yith');
+?>

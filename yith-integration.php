@@ -51,11 +51,12 @@ function add_request_replacement_button_to_order_items($item_id, $item, $order) 
     if ($order->get_status() == 'completed' && !get_post_meta($order->get_id(), '_replacement_request_submitted_' . $item_id, true)) {
         $completion_date = $order->get_date_completed();
         if ($completion_date && (time() - $completion_date->getTimestamp()) <= 7 * DAY_IN_SECONDS && !get_post_meta($order->get_id(), '_replacement_request_submitted', true)) {
+            $max_quantity = $item->get_quantity();
             ?>
             <div class="replacement-request-container">
-                <button class="button replacement-request-button" data-order-id="<?php echo $order->get_id(); ?>" data-item-id="<?php echo $item_id; ?>">
-                    <?php _e('تقديم طلب استبدال', 'woocommerce'); ?>
-                </button>
+                <button class="button replacement-request-button" data-order-id="<?php echo $order->get_id(); ?>" data-item-id="<?php echo $item_id; ?>" data-max-quantity="<?php echo $max_quantity; ?>">
+                <?php _e('تقديم طلب استبدال', 'woocommerce'); ?>
+            </button>
             </div>
             <?php
         }
@@ -89,15 +90,16 @@ function display_replacement_request_form_popup() {
             <h2><?php _e('طلب أستبدال', 'woocommerce'); ?></h2>
             <p>
                 <label for="replacement_message"><?php _e('لماذا تريد أستبدال المنتج؟', 'woocommerce'); ?></label>
-                <textarea name="replacement_message" id="replacement_message" rows="5"></textarea>
+                <textarea name="replacement_message" id="replacement_message" rows="5" required></textarea>
             </p>
             <p>
                 <label for="replacement_quantity"><?php _e('الكمية:', 'woocommerce'); ?></label>
-                <input type="number" name="replacement_quantity" id="replacement_quantity" min="1" value="1">
+                <input type="number" name="replacement_quantity" id="replacement_quantity" min="1" value="1" required>
             </p>
             <p>
                 <input type="hidden" name="order_id" id="replacement_order_id">
                 <input type="hidden" name="item_id" id="replacement_item_id">
+                <input type="hidden" name="max_quantity" id="max_quantity">
                 <button type="submit" name="submit_replacement_request" class="button"><?php _e('أرسال الطلب', 'woocommerce'); ?></button>
             </p>
         </form>
@@ -108,7 +110,7 @@ function display_replacement_request_form_popup() {
             <h2><?php _e('طلب أستبدال الطلب بالكامل', 'woocommerce'); ?></h2>
             <p>
                 <label for="replacement_message_whole"><?php _e('لماذا تريد أستبدال الطلب بالكامل؟', 'woocommerce'); ?></label>
-                <textarea name="replacement_message_whole" id="replacement_message_whole" rows="5"></textarea>
+                <textarea name="replacement_message_whole" id="replacement_message_whole" rows="5" required></textarea>
             </p>
             <p>
                 <input type="hidden" name="order_id_whole" id="replacement_order_id_whole">
@@ -121,8 +123,11 @@ function display_replacement_request_form_popup() {
             $('.replacement-request-button').click(function() {
                 var orderId = $(this).data('order-id');
                 var itemId = $(this).data('item-id');
+                var maxQuantity = $(this).data('max-quantity');
                 $('#replacement_order_id').val(orderId);
                 $('#replacement_item_id').val(itemId);
+                $('#max_quantity').val(maxQuantity);
+                $('#replacement_quantity').attr('max', maxQuantity);
                 $('#replacement-request-popup-overlay, #replacement-request-popup').show();
             });
 
@@ -135,11 +140,22 @@ function display_replacement_request_form_popup() {
             $('.close-popup, #replacement-request-popup-overlay').click(function() {
                 $('#replacement-request-popup-overlay, #replacement-request-popup, #replacement-request-popup-whole').hide();
             });
+
+            $('#replacement-request-form').submit(function(event) {
+                var replacementQuantity = parseInt($('#replacement_quantity').val());
+                var maxQuantity = parseInt($('#max_quantity').val());
+                if (replacementQuantity > maxQuantity) {
+                    alert('<?php _e('الكمية المطلوبة تتجاوز الكمية المتاحة في الطلب.', 'woocommerce'); ?>');
+                    event.preventDefault();
+                }
+            });
         });
     </script>
     <?php
 }
 add_action('wp_footer', 'display_replacement_request_form_popup');
+
+
 
 // Handle form submission for individual items
 function handle_replacement_request() {

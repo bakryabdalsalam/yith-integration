@@ -52,14 +52,17 @@ function add_request_replacement_button_to_order_items($item_id, $item, $order) 
         $completion_date = $order->get_date_completed();
         if ($completion_date && (time() - $completion_date->getTimestamp()) <= 7 * DAY_IN_SECONDS && !get_post_meta($order->get_id(), '_replacement_request_submitted', true)) {
             ?>
-            <button class="button replacement-request-button" data-order-id="<?php echo $order->get_id(); ?>" data-item-id="<?php echo $item_id; ?>">
-                <?php _e('تقديم طلب استبدال', 'woocommerce'); ?>
-            </button>
+            <div class="replacement-request-container">
+                <button class="button replacement-request-button" data-order-id="<?php echo $order->get_id(); ?>" data-item-id="<?php echo $item_id; ?>">
+                    <?php _e('تقديم طلب استبدال', 'woocommerce'); ?>
+                </button>
+            </div>
             <?php
         }
     }
 }
 add_action('woocommerce_order_item_meta_end', 'add_request_replacement_button_to_order_items', 10, 3);
+
 
 // Display the replacement request button for the whole order
 function add_request_replacement_button_for_whole_order($order) {
@@ -87,6 +90,10 @@ function display_replacement_request_form_popup() {
             <p>
                 <label for="replacement_message"><?php _e('لماذا تريد أستبدال المنتج؟', 'woocommerce'); ?></label>
                 <textarea name="replacement_message" id="replacement_message" rows="5"></textarea>
+            </p>
+            <p>
+                <label for="replacement_quantity"><?php _e('الكمية:', 'woocommerce'); ?></label>
+                <input type="number" name="replacement_quantity" id="replacement_quantity" min="1" value="1">
             </p>
             <p>
                 <input type="hidden" name="order_id" id="replacement_order_id">
@@ -140,6 +147,7 @@ function handle_replacement_request() {
         $order_id = absint($_POST['order_id']);
         $item_id = absint($_POST['item_id']);
         $message = sanitize_textarea_field($_POST['replacement_message']);
+        $quantity = absint($_POST['replacement_quantity']);
         $order = wc_get_order($order_id);
 
         if (!$order) {
@@ -151,13 +159,14 @@ function handle_replacement_request() {
         if ($order->get_status() === 'completed' && (time() - $order->get_date_completed()->getTimestamp()) <= 7 * DAY_IN_SECONDS) {
             // Check if a replacement request has already been submitted for the item
             if (!get_post_meta($order_id, '_replacement_request_submitted_' . $item_id, true) && !get_post_meta($order_id, '_replacement_request_submitted', true)) {
-                // Save the message as post meta
+                // Save the message and quantity as post meta
                 update_post_meta($order_id, '_replacement_request_message_' . $item_id, $message);
+                update_post_meta($order_id, '_replacement_request_quantity_' . $item_id, $quantity);
                 update_post_meta($order_id, '_replacement_request_submitted_' . $item_id, true);
                 update_post_meta($order_id, '_replacement_request_submitted', true);
 
                 // Create a refund request using the YITH Refund System plugin
-                $refund_request_created = create_yith_refund_request($order_id, $item_id, $message);
+                $refund_request_created = create_yith_refund_request($order_id, $item_id, $message, $quantity);
 
                 if ($refund_request_created) {
                     // Add meta to refund request post to link it back to the original order
@@ -201,7 +210,7 @@ function handle_replacement_request_whole() {
                 update_post_meta($order_id, '_replacement_request_submitted', true);
 
                 // Create a refund request using the YITH Refund System plugin
-                $refund_request_created = create_yith_refund_request($order_id, 0, $message); // 0 indicates the whole order
+                $refund_request_created = create_yith_refund_request($order_id, 0, $message, 0); // 0 indicates the whole order
 
                 if ($refund_request_created) {
                     // Add meta to refund request post to link it back to the original order
@@ -222,8 +231,10 @@ function handle_replacement_request_whole() {
 }
 add_action('template_redirect', 'handle_replacement_request_whole');
 
-// Function to create a refund request using YITH Refund System plugin
-function create_yith_refund_request($order_id, $item_id, $message) {
+
+//create request with yith refund plugin
+
+function create_yith_refund_request($order_id, $item_id, $message, $quantity) {
     if (!class_exists('YITH_Refund_Request')) {
         error_log('YITH Refund Request class not found.');
         return false;
@@ -238,16 +249,36 @@ function create_yith_refund_request($order_id, $item_id, $message) {
     $refund_request = new YITH_Refund_Request();
     $refund_request->order_id = $order_id;
     $refund_request->whole_order = ($item_id === 0); // True if the refund is for the entire order
-    $refund_request->item_id = $item_id;
-    $refund_request->item_value = ($item_id === 0) ? 0 : $order->get_item($item_id)->get_total();
-    $refund_request->item_total = ($item_id === 0) ? $order->get_total() : $order->get_item($item_id)->get_total();
+
+    // Handle the specific item or whole order case
+    if ($item_id !== 0) {
+        $item = $order->get_item($item_id);
+        $item_total = $item->get_total();
+        $item_quantity = $item->get_quantity();
+        $item_price = $item_total / $item_quantity;
+
+        // Calculate the refund amount based on the specified quantity
+        $refund_amount = $item_price * $quantity;
+        $refund_request->item_id = $item_id;
+        $refund_request->item_value = $refund_amount;
+        $refund_request->item_total = $refund_amount;
+        $refund_request->qty = $quantity;
+        $refund_request->qty_total = $quantity;
+        $refund_request->item_refund_total = $refund_amount;
+        $refund_request->refund_total = $refund_amount;
+    } else {
+        $refund_request->item_id = 0;
+        $refund_request->item_value = 0;
+        $refund_request->item_total = $order->get_total();
+        $refund_request->qty = 0;
+        $refund_request->qty_total = 0;
+        $refund_request->item_refund_total = $order->get_total();
+        $refund_request->refund_total = $order->get_total();
+    }
+
     $refund_request->tax_value = 0;
     $refund_request->tax_total = 0;
-    $refund_request->qty = ($item_id === 0) ? 0 : $order->get_item($item_id)->get_quantity();
-    $refund_request->qty_total = ($item_id === 0) ? $order->get_item_count() : $order->get_item($item_id)->get_quantity();
-    $refund_request->item_refund_total = ($item_id === 0) ? $order->get_total() : $order->get_item($item_id)->get_total();
     $refund_request->tax_refund_total = 0;
-    $refund_request->refund_total = ($item_id === 0) ? $order->get_total() : $order->get_item($item_id)->get_total();
     $refund_request->refund_id = 0;
     $refund_request->refunded_amount = 0;
     $refund_request->customer_id = $order->get_user_id();
@@ -271,6 +302,7 @@ function create_yith_refund_request($order_id, $item_id, $message) {
     return $refund_request_id; // Return the refund request ID
 }
 
+
 // Display replacement request message in the order admin page
 function display_replacement_message_in_admin($order) {
     foreach ($order->get_items() as $item_id => $item) {
@@ -286,23 +318,51 @@ function display_replacement_message_in_admin($order) {
 }
 add_action('woocommerce_admin_order_data_after_order_details', 'display_replacement_message_in_admin');
 
-// Add a replacement label to the orders table in the admin dashboard
-function add_replacement_label_to_order_list($column, $post_id) {
-    if ($column === 'order_number') {
-        $order = wc_get_order($post_id);
+// Add custom column to orders list
+function add_custom_replacement_column($columns) {
+    $new_columns = array();
+
+    foreach ($columns as $column_name => $column_info) {
+        $new_columns[$column_name] = $column_info;
+        if ('order_number' === $column_name) {
+            $new_columns['replacement_requests'] = __('طلبات الاستبدال', 'woocommerce');
+        }
+    }
+
+    return $new_columns;
+}
+add_filter('manage_edit-shop_order_columns', 'add_custom_replacement_column');
+
+// Add data to the custom column
+function add_replacement_requests_to_order_list($column) {
+    global $post;
+
+    if ($column === 'replacement_requests') {
+        $order = wc_get_order($post->ID);
+
+        // Check for item-level replacement requests
+        $item_replacements = array();
         foreach ($order->get_items() as $item_id => $item) {
-            $replacement_request_submitted = get_post_meta($post_id, '_replacement_request_submitted_' . $item_id, true);
+            $replacement_request_submitted = get_post_meta($post->ID, '_replacement_request_submitted_' . $item_id, true);
             if ($replacement_request_submitted) {
-                echo ' <span style="color: green;" title="Replacement Requested for Item: ' . esc_attr($item->get_name()) . '">طلب أستبدال (' . esc_html($item->get_name()) . ')</span>';
+                $item_replacements[] = esc_html($item->get_name());
             }
         }
-        $replacement_request_submitted_whole = get_post_meta($post_id, '_replacement_request_submitted_whole', true);
+
+        // Check for whole-order replacement request
+        $replacement_request_submitted_whole = get_post_meta($post->ID, '_replacement_request_submitted_whole', true);
+
         if ($replacement_request_submitted_whole) {
-            echo ' <span style="color: green;" title="Replacement Requested for Whole Order">طلب أستبدال (الطلب بالكامل)</span>';
+            echo '<span style="color: green;" title="Replacement Requested for Whole Order">طلب أستبدال (الطلب بالكامل)</span>';
+        } elseif (!empty($item_replacements)) {
+            echo '<span style="color: green;" title="Replacement Requested for Items: ' . esc_attr(implode(', ', $item_replacements)) . '">طلب أستبدال (' . esc_html(implode(', ', $item_replacements)) . ')</span>';
+        } else {
+            echo '—';
         }
     }
 }
-add_action('manage_shop_order_posts_custom_column', 'add_replacement_label_to_order_list', 10, 2);
+add_action('manage_shop_order_posts_custom_column', 'add_replacement_requests_to_order_list');
+
 
 // Add a custom column to the refund requests table
 function add_custom_refund_request_columns($columns) {

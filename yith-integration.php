@@ -22,15 +22,21 @@ function enqueue_replacement_request_scripts() {
             top: 50%;
             transform: translate(-50%, -50%);
             background-color: #fff;
-            padding: 20px;
-            box-shadow: 0 0 10px rgba(0, 0, 0, 0.5);
+            padding: 30px;
+            box-shadow: 0 0 15px rgba(0, 0, 0, 0.5);
             z-index: 9999;
+            border-radius: 8px;
+            width: 400px;
+            max-width: 90%;
+            text-align: center;
         }
         #replacement-request-popup .close-popup, #replacement-request-popup-whole .close-popup {
             position: absolute;
             top: 10px;
             right: 10px;
             cursor: pointer;
+            font-size: 20px;
+            color: #333;
         }
         #replacement-request-popup-overlay {
             display: none;
@@ -41,6 +47,41 @@ function enqueue_replacement_request_scripts() {
             height: 100%;
             background-color: rgba(0, 0, 0, 0.5);
             z-index: 9998;
+        }
+        #replacement-request-popup h2, #replacement-request-popup-whole h2 {
+            margin-bottom: 20px;
+            font-size: 24px;
+            color: #333;
+        }
+        #replacement-request-popup p, #replacement-request-popup-whole p {
+            margin-bottom: 15px;
+        }
+        #replacement-request-popup label, #replacement-request-popup-whole label {
+            display: block;
+            margin-bottom: 5px;
+            font-weight: bold;
+        }
+        #replacement-request-popup textarea, #replacement-request-popup-whole textarea, 
+        #replacement-request-popup input[type="number"] {
+            width: calc(100% - 20px);
+            padding: 10px;
+            margin-bottom: 10px;
+            border: 1px solid #ccc;
+            border-radius: 4px;
+            font-size: 14px;
+        }
+        #replacement-request-popup button, #replacement-request-popup-whole button {
+            background-color: #0071a1;
+            color: #fff;
+            border: none;
+            padding: 10px 20px;
+            cursor: pointer;
+            font-size: 16px;
+            border-radius: 4px;
+            transition: background-color 0.3s;
+        }
+        #replacement-request-popup button:hover, #replacement-request-popup-whole button:hover {
+            background-color: #005f8b;
         }
     ');
 }
